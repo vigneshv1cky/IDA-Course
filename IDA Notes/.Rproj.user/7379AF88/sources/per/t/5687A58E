@@ -1,0 +1,26 @@
+{
+    "id": "5687A58E",
+    "path": "~/RStudio/IDA Notes/Unit 7- Multiple Linear Regression/R code/Lasso and Ridge.R",
+    "project_path": "Unit 7- Multiple Linear Regression/R code/Lasso and Ridge.R",
+    "type": "r_source",
+    "hash": "798421274",
+    "contents": "",
+    "dirty": false,
+    "created": 1728230821089.0,
+    "source_on_save": false,
+    "relative_order": 6,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "45,4",
+        "scrollLine": "0"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1728230487,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1728230487,
+    "read_only": false,
+    "read_only_alternatives": []
+}
