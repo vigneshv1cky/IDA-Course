@@ -1,0 +1,328 @@
+---
+title: "Clustering of Wine Quality Dataset"
+author: "Vignesh Murugan"
+date: "2024-11-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(e1071)
+library(caret)
+library(useful)
+library(cluster)
+library(dbscan)
+```
+
+# Introduction
+
+The data comes from the UCI Machine Learning Repository, a widely recognized source for machine learning datasets.
+
+URL: https://archive.ics.uci.edu/dataset/186/wine+quality
+
+The Red Wine Quality Dataset is a subset of the Wine Quality Dataset that contains physicochemical and sensory data for red wines only. It is used to evaluate red wine quality based on physicochemical tests.
+
+**Basic Description:**
+The dataset includes physicochemical features such as acidity, pH, alcohol content, residual sugar, and others.
+It also contains a quality score (integer from 0 to 10), representing the wine's quality based on sensory analysis by wine tasters.
+
+**Number of Observations:**
+1,599 observations (each representing a red wine sample).
+
+**Number of Features:**
+12 features (excluding the quality score):
+
+**Numeric Variables:** All 12 physicochemical properties are numeric (e.g., fixed acidity, volatile acidity, citric acid, pH, etc.).
+
+**Factor Variable:** The quality score can be treated as a factor variable for classification tasks, though it is numeric in the raw dataset.
+
+This report provides an analysis of the Wine Quality dataset, including exploratory data analysis, dimensionality reduction, and clustering techniques.
+
+We already know that are 6 types of Wine Qualities in the dataset using the "quality" variable.
+But we wont be using it for training.
+
+# Data Preparation
+
+```{r echo=FALSE}
+Train <- read_delim("/Users/vignesh/RStudio/IDA_Homework/IDA_HW_8/wine+quality/winequality-red.csv", 
+                    delim = ";", show_col_types = FALSE)
+Train <- as_tibble(Train)
+glimpse(Train)
+
+# Extract and prepare quality variable
+quality <- Train %>% 
+  select(quality) %>% 
+  mutate(quality = as_factor(quality))
+table(quality)
+Train <- Train %>% select(-quality)
+```
+
+## Summary Statistics
+
+```{r pressure, echo=FALSE}
+# Define functions
+Q1 <- function(x, na.rm = TRUE) quantile(x, na.rm = na.rm)[2]
+Q3 <- function(x, na.rm = TRUE) quantile(x, na.rm = na.rm)[4]
+myNumericSummary <- function(x) {
+  c(length(x), n_distinct(x), sum(is.na(x)), mean(x, na.rm = TRUE),
+    min(x, na.rm = TRUE), Q1(x, na.rm = TRUE), median(x, na.rm = TRUE),
+    Q3(x, na.rm = TRUE), max(x, na.rm = TRUE), sd(x, na.rm = TRUE))
+}
+
+# Compute summary
+numericSummary <- Train %>%
+  reframe(across(everything(), myNumericSummary)) %>%
+  cbind(stat = c("n", "unique", "missing", "mean", "min", "Q1", "median", "Q3", "max", "sd")) %>%
+  pivot_longer("fixed acidity":"alcohol", names_to = "variable", values_to = "value") %>%
+  pivot_wider(names_from = stat, values_from = value) %>%
+  mutate(n = as.numeric(n), unique = as.numeric(unique), missing = as.numeric(missing),
+         missing_pct = 100 * missing / n, unique_pct = 100 * unique / n) %>%
+  dplyr::select(variable, n, missing, missing_pct, unique, unique_pct, everything())
+numericSummary
+
+```
+
+```{r echo=FALSE}
+
+skewValues_tibble <- Train %>%
+  summarise(across(everything(), ~ skewness(.x, na.rm = TRUE))) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Skewness") %>%
+  arrange(Skewness)
+skewValues_tibble
+
+```
+
+
+```{r include=FALSE}
+
+BoxCoxTrans(Train$chlorides)
+BoxCoxTrans(Train$`residual sugar` + 1)
+BoxCoxTrans(Train$sulphates+1)
+BoxCoxTrans(Train$`total sulfur dioxide`+1)
+BoxCoxTrans(Train$`free sulfur dioxide`+1)
+
+boxcox_obj1 <- BoxCoxTrans(Train$chlorides)
+boxcox_obj2 <- BoxCoxTrans(Train$`residual sugar` + 1)
+boxcox_obj3 <- BoxCoxTrans(Train$sulphates+1)
+boxcox_obj4 <- BoxCoxTrans(Train$`total sulfur dioxide`+1)
+boxcox_obj5 <- BoxCoxTrans(Train$`free sulfur dioxide`+1)
+
+Train$chlorides <- predict(boxcox_obj1, Train$chlorides)
+Train$`residual sugar` <- predict(boxcox_obj2, Train$`residual sugar`+1)
+Train$sulphates <- predict(boxcox_obj3, Train$sulphates+1)
+Train$`total sulfur dioxide` <- predict(boxcox_obj4, Train$`total sulfur dioxide`+1)
+Train$`free sulfur dioxide` <- predict(boxcox_obj5, Train$`free sulfur dioxide`+1)
+
+
+```
+
+# PCA
+
+The first 2 PCA are plotted with actual target variables.
+
+```{r echo=FALSE}
+pca <- prcomp(Train, scale = TRUE)
+summary(pca)
+
+pcaData <- tibble(PC1 = pca$x[, 1], PC2 = pca$x[, 2])
+
+pcaData <- tibble(PC1 = pca$x[, 1], 
+                      PC2 = pca$x[, 2], 
+                      Quality = factor(quality$quality))
+
+# Plot the PCA results with quality as the color fill
+ggplot(pcaData, aes(x = PC1, y = PC2, color = Quality)) +
+  geom_point() +
+  labs(title = "PCA of Dataset with Quality Labels",
+       x = "Principal Component 1",
+       y = "Principal Component 2",
+       color = "Wine Quality") +
+  theme_minimal()
+```
+
+# K-Means Clustering
+
+The visualization of K-means clustering with PCA combines two distinct methodologies to simplify and interpret complex data:
+
+- **Principal Component Analysis (PCA)**: Reduces the data dimensions while preserving the maximum variance.
+- **K-means Clustering**: Groups the data into clusters based on their similarity.
+
+The Hartigans Rule doesn't show the optimal Number of clusters.
+
+```{r echo=FALSE}
+
+kmeans_result <- kmeans(Train, centers = 6, nstart = 25)
+
+# Use the first two principal components for plotting
+cluster_data <- tibble(
+  PC1 = pca$x[, 1],
+  PC2 = pca$x[, 2],
+  ClusterKMeans = factor(kmeans_result$cluster),  # K-means cluster assignments
+  Quality = factor(quality$quality)        # Wine quality
+)
+
+# Plot the K-means clustering result
+ggplot(cluster_data, aes(x = PC1, y = PC2, color = ClusterKMeans)) +
+  geom_point( ) +
+  labs(
+    title = "K-means Clustering with PCA",
+    x = "Principal Component 1",
+    y = "Principal Component 2",
+    color = "Cluster"
+  ) +
+  theme_minimal()
+
+library(useful)
+# Evaluate K-means for multiple cluster options using FitKMeans
+fit_kmeans_result <- FitKMeans(Train, max.clusters = 10, nstart = 40, iter.max = 100)
+
+# Plot the evaluation to visualize the optimal number of clusters
+PlotHartigan(fit_kmeans_result) +
+  labs(
+    title = "Hartigan's Rule for Optimal Clusters",
+    x = "Number of Clusters",
+    y = "Hartigan's Index"
+  ) +
+  theme_minimal()
+
+# Compute SSE for different numbers of clusters
+sse_kmeans <- sapply(1:10, function(k) {
+  kmeans(Train, centers = k, nstart = 25)$tot.withinss
+})
+
+# Plot SSE vs. Number of Clusters
+ggplot(data = tibble(Clusters = 1:10, SSE = sse_kmeans), aes(x = Clusters, y = SSE)) +
+  geom_line(color = "blue3") +
+  geom_point(color = "red3") +
+  labs(
+    title = "Elbow Plot for K-means Clustering",
+    x = "Number of Clusters",
+    y = "Sum of Squared Errors (SSE)"
+  ) +
+  theme_minimal()
+  
+```
+
+# PAM Clustering
+
+The visualization of PAM clustering with PCA combines two distinct methodologies to simplify and interpret complex data:
+
+- **Principal Component Analysis (PCA)**: Reduces the data dimensions while preserving the maximum variance.
+- **PAM Clustering**: Groups the data into clusters based on their similarity.
+
+```{r echo=FALSE}
+
+#############
+# PAM
+############
+
+library(cluster)
+
+# Apply k-medoids clustering
+kmedoids_result <- pam(Train, k = 6)  # k = 6 clusters
+
+# Add k-medoids cluster labels to the dataset
+cluster_data$Cluster_kmedoids <- factor(kmedoids_result$clustering)
+
+# Plot PAM clustering results with medoids
+ggplot(cluster_data, aes(x = PC1, y = PC2, color = Cluster_kmedoids)) +
+  geom_point() +
+  labs(
+    title = "PAM Clustering with PCA",
+    x = "Principal Component 1",
+    y = "Principal Component 2",
+    color = "Cluster"
+  ) +
+  theme_minimal()
+
+
+```
+
+
+# Hierarchical Clustering
+Hierarchical clustering is a method of grouping data into a hierarchy of clusters. It builds a tree-like structure (dendrogram) that visualizes the relationships among the data points. Unlike k-means or k-medoids, hierarchical clustering does not require specifying the number of clusters in advance and provides flexibility in choosing clusters by "cutting" the dendrogram at different levels.
+
+```{r echo=FALSE}
+
+
+#############
+# Hierarchial Clustering
+############
+
+# Compute distance matrix
+dist_matrix <- dist(Train)
+
+# Perform hierarchical clustering using Ward's method
+hclust_result <- hclust(dist_matrix, method = "ward.D2")
+
+# Cut the tree into 6 clusters
+hierarchical_clusters <- cutree(hclust_result, k = 6)
+
+# Add hierarchical cluster labels to the dataset
+cluster_data$Cluster_hierarchical <- factor(hierarchical_clusters)
+
+# Plot dendrogram
+plot(hclust_result, labels = FALSE, main = "Dendrogram of Hierarchical Clustering")
+rect.hclust(hclust_result, k = 6, border = "coral")
+
+```
+
+# Conclusion ( Used K Means)
+
+Thea Reason I am using Kmeans is cause its a simpler and basic model.
+
+**Cluster 1: Balanced, Dry Red Wines**
+
+- Low volatile acidity (-1.04): Indicates minimal sharpness or vinegar-like notes, suggesting smoother wines.
+
+- Moderate-to-high alcohol (0.99): Wines with decent strength, likely around 12-14% alcohol by volume (ABV).
+
+- Profile: Likely dry red wines with balanced acidity and alcohol, appealing to a wide audience and suitable for casual drinking or pairing with meals like pasta or red meat.
+
+**Cluster 2: Full-Bodied, High-Acidity Red Wines**
+
+- High fixed acidity (1.67) and citric acid (1.29): These wines have a bright, tangy taste, typical of highly acidic profiles.
+
+- High density (1.14): Suggests fuller-bodied wines, often richer and heavier.
+
+- Profile: Likely full-bodied red wines, such as Cabernet Sauvignon or Merlot, with a strong acidic backbone and rich texture, suitable for pairing with red meats and bold flavors.
+
+**Cluster 3: Light-Bodied, High-Alcohol Wines**
+
+- Low fixed acidity (-1.13) and citric acid (-0.92): Suggests less tartness and a softer profile.
+
+- High alcohol (1.23): Wines with strong ABV, likely above 14%, which may result in a warm finish.
+
+- Profile: Likely light-bodied, high-alcohol red wines, such as Grenache or Zinfandel, suitable for sipping or pairing with lighter dishes like roasted vegetables or poultry.
+
+**Cluster 4: Sharp, Low-Alcohol Wines**
+
+- High volatile acidity (0.69): Indicates noticeable sharpness, potentially contributing to a tangy or slightly sour taste.
+
+- Low sulphates (-0.47): Less pronounced bitterness or astringency.
+
+- Low alcohol (-0.46): Likely wines with ABV below 12%, resulting in a lighter and more refreshing profile.
+
+- Profile: Likely sharp, low-alcohol red wines, such as certain styles of Pinot Noir or Beaujolais, often enjoyed as refreshing, easy-drinking options.
+
+**Cluster 5: Salty, Briny Dessert Wines**
+
+- High chlorides (2.05): Indicates significant saltiness, an unusual characteristic often found in dessert or fortified wines.
+
+- High sulphates (2.17): Suggests potential bitterness or mineral notes, complementing the briny profile.
+
+- Low alcohol (-0.85): Suggests a lighter wine.
+
+- Profile: Likely fortified or dessert wines with unique salty/briny flavors, such as Sherry or Madeira, ideal for pairing with nuts, cheeses, or desserts.
+
+**Cluster 6: Preserved, Sweet Wines**
+
+- High free sulfur dioxide (0.79) and total sulfur dioxide (1.01): Indicates significant preservation, often used for sweeter wines.
+
+- Moderate residual sugar (0.34): Suggests a slight sweetness.
+
+- Profile: Likely preserved, semi-sweet wines, such as Moscato or Riesling, with moderate sweetness and shelf stability, ideal for casual sipping or pairing with desserts.
+
+

@@ -1,0 +1,381 @@
+---
+title: "Team5_HW4"
+author: "Tyler Brassfield"
+date: "2024-09-20"
+output: pdf_document
+---
+
+```{r}
+# Required packages
+library(tidyverse)
+library(dplyr)
+library(forcats)
+library(ggplot2)
+library(knitr)
+library(mice)
+library(moments)
+library(EnvStats)
+library(car)
+```
+
+--- Question 1: Data Quality Report ---
+
+```{r}
+########## (a) ########## 
+
+df <- tibble(read.csv('housingData.csv')) 
+df <- df %>%
+  dplyr::mutate(age = YrSold - YearBuilt,
+                ageSinceRemodel = YrSold - YearRemodAdd,
+                ageofGarage = YrSold - GarageYrBlt)
+
+    # Created 3 columns as functions of 3 existing columns within the data
+    # based on the above equations
+
+# (b) Create a tibble named "housingNumeric" containing all numeric variables
+#     from the original housing data
+
+housingNumeric <- df %>%
+  dplyr::select(where(is.numeric))
+
+# (c) Create a tibble named "housingNumeric" containing all non-numeric 
+#     variables from the original housing data
+
+housingFactor <- df %>%
+  dplyr::transmute(across(where(is.character), as.factor))
+
+# (d) Glimpse into the newly created tables
+
+# glimpse(housingNumeric) # new tibble made up of only "int" data types
+# glimpse(housingFactor)  # new tibble made up of only factors
+
+head(housingNumeric)
+head(housingFactor)
+
+# (e) Create functions for calculating 1st and 3rd quartiles
+
+Q1 <- function(x, na.rm = TRUE) {
+      quantile(x, na.rm = na.rm)[2]
+}
+
+Q3 <- function(x, na.rm = TRUE) {
+      quantile(x, na.rm = na.rm)[4]
+}
+
+    # The above functions compute the quantiles for numeric variables
+    # within the data. Because the quantile() function returns a list 
+    # of 5 numbers, to return the 1st and 3rd quartiles, we extract the
+    # 2nd and 4th elements from the list. Additionally, we are choosing
+    # to exclude missing values from the quantile calculations. 
+
+# (f) Create a summary for our numeric variables
+
+myNumericSummary <- function(x){
+  c(length(x), n_distinct(x), sum(is.na(x)), mean(x, na.rm = TRUE),
+  min(x, na.rm = TRUE), Q1(x, na.rm = TRUE), median(x, na.rm = TRUE),
+  Q3(x, na.rm = TRUE), max(x, na.rm = TRUE), sd(x, na.rm = TRUE))
+}
+
+# (g) Create a tibble of summary statistics for the numerical data 
+
+numericSummary <- housingNumeric %>%
+  summarize(
+    across(everything(), myNumericSummary)
+  )
+
+# (h) Create column names for clarity/tidiness
+
+numericSummary <- cbind(
+                  Statistic = c("n", "unique","missing","mean","min",
+                                "Q1","median","Q3","max","sd"),
+                  numericSummary)
+glimpse(numericSummary)
+
+# (i) Pivot the data and add computed values
+
+
+numericSummaryFinal <- numericSummary %>%
+    pivot_longer("Id":"ageofGarage", names_to ="variable", 
+                 values_to = "value") %>%
+    pivot_wider(names_from = Statistic, values_from = value) %>%
+    mutate(missing_pct = 100*missing/n,
+           unique_pct = 100*unique/n) %>%
+    select(variable, n, missing, missing_pct, unique, unique_pct, everything())
+options(digits = 3)
+options(scipen = 99)
+numericSummaryFinal %>% kable()
+
+# (j) Create report for the factor data
+
+#### Create mode name and frequency retrieval functions ####
+
+getmodenames <- function(v, type = 1) {
+  
+  tbl <- table(v)
+  m1 <- which.max(tbl)
+  
+  if (type == 1) {
+        return (names(m1))                    # 1st mode
+  }
+  else if (type == 2) {
+        return (names(which.max(tbl[-m1])))   # 2nd mode
+  }
+  else if (type == -1) {
+        return (names(which.min(tbl)))        # least common mode
+  }
+  else {
+        stop("Invalid type selected")
+  }
+}
+
+getmodes <- function(v, type = 1) {
+  
+  tbl <- table(v)
+  m1 <- which.max(tbl)
+  
+  if (type == 1) {
+        return (max(tbl))         # 1st mode frequency
+  }
+  else if (type == 2) {
+        return (max(tbl[-m1]))     # 2nd mode frequency
+  }
+  else if (type == -1) {
+        return (min(tbl))        # least common frequency
+  }
+  else {
+    stop("Invalid type selected")
+  }
+}
+
+############################################################
+
+myFactorSummary <- function(x){
+    c(length(x), n_distinct(x), sum(is.na(x)), getmodenames(x, type = 1),
+      getmodes(x, type = 1), getmodenames(x, type = 2), getmodes(x, type = 2),
+      getmodenames(x, type = -1), getmodes(x, type = -1))
+}
+
+factorSummary <- housingFactor %>%
+    summarize(
+      across(everything(), myFactorSummary)
+  )
+
+factorSummary <- cbind(Statistic = c("n","unique","missing",
+                                     "1st mode","1st mode freq",
+                                     "2nd mode","2nd mode freq",
+                                     "least common","least common freq"),
+                                      factorSummary)
+
+glimpse(factorSummary)
+
+factorSummaryFinal <- factorSummary %>%
+    pivot_longer("MSZoning":"SaleType", names_to = "variable",
+                 values_to = "value") %>%
+    pivot_wider(names_from = Statistic, values_from = value) %>%
+    mutate(missing=as.numeric(missing),
+           n = as.numeric(n),
+           unique = as.numeric(unique),
+           `1st mode freq` = as.numeric(`1st mode freq`),
+           `2nd mode freq` = as.numeric(`2nd mode freq`)) %>%
+    mutate(missing_pct = 100*missing/n,
+           unique_pct = 100*unique/n,
+           freqRatio = (`1st mode freq`) / (`2nd mode freq`)) %>%
+    select(variable, n, missing, missing_pct, unique, unique_pct, freqRatio,
+           everything())
+options(digits = 3)
+options(scipen = 99)
+factorSummaryFinal %>% kable()
+
+    # This was the same procedure as the preceding summary; however, I needed
+    # to convert a few of the variables to numeric rather than characters!
+
+
+```
+
+--- Question 2: Transformations ---
+
+```{r}
+
+original <- tibble(read.csv('housingData.csv'))
+housing <- tibble(read.csv('housingData.csv')) # Load data into a tibble
+
+########## (a) Identify Skewness and rectify ##########
+
+par(mfrow = c(1,2))
+symbox(housing$SalePrice, data = housing, powers=c(3,2,1,0,-0.5,-1,-2), 
+       ylab = "Sale Price")
+boxcox(housing$SalePrice)
+
+    # lambda = 0 (logarithmic transformation) reduces the skewness the most
+    # for Sales Price
+
+symbox(housing$LotFrontage, data = housing, powers=c(3,2,1,0,-0.5,-1,-2),
+       ylab = "LotFrontage")
+boxcox(housing$LotFrontage)
+
+    # lambda = 0.5 (square root) reduces the skewness the most for Lot Frontage
+
+par(mfrow = c(2,2))
+hist(housing$SalePrice, col = "red", 
+     main = "Before", xlab = "Sale Price")  # Visualize skewed variables
+skewness(housing$SalePrice)                 # Skewness = 1.96 before
+
+housing$SalePrice <- log(df$SalePrice + 1)
+hist(housing$SalePrice, col = "blue",
+     main = "After", xlab = "Sale Price")
+skewness(housing$SalePrice)                 # Skewness = 0.146 after
+
+hist(housing$LotFrontage, col = "red", main = "", xlab = "Lot Frontage") 
+skewness(housing$LotFrontage, na.rm = TRUE) # Calculate skewness to verify
+                                            # Skewness = 1.91 before
+
+housing$LotFrontage <- sqrt(housing$LotFrontage)
+hist(housing$LotFrontage, col = "blue", main = "", 
+     xlab = "Lot Frontage") 
+skewness(housing$LotFrontage, na.rm = TRUE) # Skewness reduced to 0.246
+
+########## (b) Imputation of missing values ##########
+
+  # i - Mean value imputation
+housing$LotFrontage[is.na(housing$LotFrontage)] <- mean(housing$LotFrontage,
+                                                        na.rm = TRUE) 
+
+      # Imputes missing values with a mean calculated excluding NA values
+
+  # ii - Regression with error
+
+dftwo <- tibble(read.csv('housingData.csv')) %>%
+  select(where(is.numeric))
+
+      # Categorical variables are not pre-processed, therefore LotFrontage 
+      # will be regressed on solely numerical variables
+
+linear_model <- lm(LotFrontage ~ ., data = dftwo, na.action = na.omit)
+missingvals <- dftwo[is.na(dftwo$LotFrontage),]
+predicted <- predict(linear_model, newdata = missingvals)
+resids <- residuals(linear_model)
+imputation <- predicted + resids
+dftwo$LotFrontage[is.na(dftwo$LotFrontage)] <- imputation
+
+      # LotFrontage was regressed on all numeric variables, but to ensure
+      # the ability for the residuals not to contain NA values, I set 
+      # na.action to na.omit rather than na.exclude. I then extracted the 
+      # predicted values, but only for the missing data within LotFrontage
+      # to ensure non-missing data wasn't imputed. I used the residuals
+      # to estimate error and added them to the predicted values, and then
+      # imputed all missing values. 
+
+  # iii - Predictive Mean Matching
+
+dfthree <- tibble(read.csv('housingData.csv')) 
+
+imputed <- mice(dfthree, method = 'pmm', m = 5, maxit = 10, 
+                seed = 500)
+completedData <- complete(imputed, 3)
+
+dfthree$LotFrontage[is.na(dfthree$LotFrontage)] <- completedData$LotFrontage[
+                                                    is.na(dfthree$LotFrontage)]
+
+        # This code was taken mostly from the mice site. We performed
+        # predictive mean matching, created 5 different imputed datasets
+        # 
+
+  # iv - Visualize transformations
+
+par(mfrow = c(2,2))
+hist(original$LotFrontage, col = "lightcoral", main = "Original Lot Frontage",
+     xlab = "Lot Frontage")
+hist(housing$LotFrontage, col = "lightcoral", main = "Mean Imputation",
+     xlab = "Lot Frontage")
+hist(dftwo$LotFrontage, col = "lightcoral", main = "Regression with Error",
+     xlab = "Lot Frontage")
+hist(dfthree$LotFrontage, col = "lightcoral", main = "Predictive Mean Matching",
+     xlab = "Lot Frontage")
+
+      # Interestingly, regression with error visually preserved the original
+      # distribution the best. PMM may have been influenced by outliers.
+      # However, it did also did well preserving the shape of the original 
+      # distribution. Mean imputation moved the distribution to the right, and 
+      # may have also been affected by outliers, as it was just a 
+      # mean calculation. Although, if we increase the maximum iterations
+      # of PMM, we expect that the means will essentially converge to values
+      # very close to the original values. maxit = 50 basically imitates
+      # the original distribution.
+
+########## (c) Categorical variable wrangling ##########
+
+dfc <- tibble(read.csv('housingData.csv'))
+
+dfc <- dfc %>%
+  mutate(Exterior1st = fct_lump_n(Exterior1st, n = 4, other_level = "Other"))
+
+levels(dfc$Exterior1st)
+
+      # Collapse all factor levels into 5 categories: HdBoard, MetalSd, 
+      # VinylSd, WdSdng, and Other to reduce dimensionality in the case
+      # that we create binary dummy variables in pre-processing.
+
+########## (d) More fun with factors ##########
+
+    # i - Compute average sale price by neighborhood
+
+avg_sale_byneighborhood <- original %>%
+  group_by(Neighborhood) %>%
+  summarize(avg_sale = mean(SalePrice, na.rm = TRUE))
+
+    # ii - Parallel boxplots of Sale Price by Neighborhood
+
+ggplot(data = original, aes(Neighborhood, SalePrice)) +
+  geom_boxplot() +
+  labs(title = "Sale Price by Neighborhood",
+       x = "Neighborhood",
+       y = "Sale Price") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+    # iii - Re-order the factor levels 
+original <- original %>%
+  mutate(Neighborhood = fct_reorder(Neighborhood,
+                                       SalePrice,
+                                       .fun = median,
+                                       .desc = TRUE))
+
+    # iv - Parallel boxplots of reordered factor levels
+ggplot(data = original, aes(Neighborhood, SalePrice)) +
+  geom_boxplot() +
+  labs(title = "Sale Price by Neighborhood (ordered by median)",
+       x = "Neighborhood",
+       y = "Sale Price") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

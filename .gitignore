@@ -1,0 +1,101 @@
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Icon files
+Icon?
+._*
+
+# Thumbnails
+._.DS_Store
+
+# macOS directory attributes
+.Spotlight-V100
+.Trashes
+.VolumeIcon.icns
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# R history files
+.Rhistory
+.Rapp.history
+
+# Session data files
+.RData
+
+# User-specific files
+.Ruserdata
+
+# Example code in package build process
+*-Ex.R
+
+# Output of R CMD build
+/*.tar.gz
+
+# Output of R CMD check
+/*.Rcheck/
+
+# RStudio files
+.Rproj.user/
+.Rproj.lock
+.Rproj
+
+# Temporary files created by R
+.Renviron
+.Renviron.user
+.Rprofile
+.Rprofile.user
+
+# Logs
+*.out
+*.log
+
+# Compiled code
+*.o
+*.so
+*.dll
+
+# Python compiled files
+*.pyc
+*.pyo
+__pycache__/
+
+# LaTeX intermediate files
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.spl
+*.gz
+*.toc
+
+# Bookdown and knitr
+*_cache/
+*_files/
+*.utf8.md
+*.knit.md
+
+# HTML and markdown intermediate files
+*.html
+*.md
+
+# Temporary files created by editors
+*.swp
+*.tmp
+*~
+
+# Data files
+*.csv
+*.tsv
+*.xlsx
+*.xls
+
+# Custom ignore patterns
+# Uncomment and modify these as needed for your project:
+# data/
+# results/

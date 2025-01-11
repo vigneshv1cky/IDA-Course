@@ -1,0 +1,194 @@
+# ---------------------------------
+# 1st question
+# ---------------------------------
+
+# 1a
+x <- c(3, 12, 6, -5, 0, 8, 15, 1, -10, 7)
+
+#1b
+y <- seq(from=min(x), to=max(x), length.out=10)
+
+# 1c
+sum(x)
+sum(y)
+mean(x)
+mean(y)     
+sd(x)
+sd(y)
+var(x)
+var(y)
+mad(x)
+mad(y)
+quantile(x, probs = seq(0, 1, 0.25))
+quantile(y, probs = seq(0, 1, 0.25))
+quantile(x, probs = seq(0, 1, 0.2))
+quantile(y, probs = seq(0, 1, 0.2))
+
+# 1d
+z <- sample(x, size=7, replace=TRUE )
+z
+
+# 1e
+t.test(x,y)
+# Differences in means are not significant
+
+# 1f
+x <- x[order(x)]
+x
+t.test(x,y ,paired=TRUE)
+
+# 1g
+negative_logical_vector <- x < 0
+negative_logical_vector
+
+# 1h
+non_negative_logical_vector <- x >= 0
+x <- x[non_negative_logical_vector]
+x
+
+# ---------------------------------
+# 2nd question
+# ---------------------------------
+
+# 2a
+col1 <- c(1,2,3,NA,5)
+col2 <- c(4,5,6,89,101)
+col3 <- c(45,NA,66,121,201)
+col4 <- c(14,NA,13,NA,27)
+X <- rbind (col1,col2,col3,col4)
+
+is.na(X)
+na.omit(X)
+complete.cases(X)
+
+X[!complete.cases(X),]
+
+# 2b
+y <- c(3,12,99,99,7,99,21)
+y[y == 99] <- NA
+y
+sum(is.na(y))
+
+# ---------------------------------
+# 3rd question
+# ---------------------------------
+
+# 3a
+college <- read.csv("/Users/vignesh/Documents/IDA_Assignment_1/college.csv")
+college <- as.data.frame(college)
+
+# 3b
+rownames(college) <- college[,1]
+View(college)
+
+college <- college[,-1]
+
+# 3c
+#i
+summary(college)
+
+college$Private <- as.factor(college$Private)
+
+summary(college)
+
+#ii
+pairs(college[,1:10])
+
+#iii
+plot(college$Private, college$Outstate, xlab= "Private", ylab= "Outstate",
+     main="Boxplots of Outstate versus Private")
+
+# iv
+Elite <- rep("No", nrow(college))
+# Create a character vector of size 777 with all elements being "No" and assigns it to 
+# variable called Elite
+
+Elite[college$Top10perc >50] <- "Yes"
+# If the values in "Top10Perc" variable are greater than 50 then those indexes in Elite 
+# are turned to yes
+
+Elite <- as.factor(Elite)
+# we convert the character vector to factor vector
+
+college <- data.frame(college ,Elite)
+# creates a new variable in college called Elite
+
+#v
+summary(college)
+
+# vi
+plot(college$Elite, college$Outstate, xlab= "Elite", ylab= "Outstate",
+     main="Boxplots of Outstate versus Elite")
+
+# vii
+par(mfrow=c(2,2))
+
+hist(college$Accept, breaks=10, 
+     main="Histogram of Accept with 10 Bins", xlab="Accept")
+
+hist(college$Accept, breaks=20, 
+     main="Histogram of Accept with 20 Bins", xlab="Accept")
+
+hist(college$Accept, breaks=30, 
+     main="Histogram of Accept with 30 Bins", xlab="Accept")
+
+hist(college$Accept, breaks=40, 
+     main="Histogram of Accept with 40 Bins", xlab="Accept")
+
+# ---------------------------------
+# 4th question
+# ---------------------------------
+
+library(plyr)
+
+# 4a
+baseball <- baseball
+
+# 4b
+baseball$sf[baseball$year < 1954] <- 0
+baseball$sf
+
+baseball$hbp[is.na(baseball$hbp)] <- 0
+baseball$hbp
+
+baseball <- baseball[baseball$ab >= 50,]
+
+# 4c
+baseball$obp <- with(baseball, (h + bb + hbp) / (ab + bb + hbp + sf))
+
+# 4d
+top_players <- baseball[order(-baseball$obp), 
+                        c("year", "id", "obp")]
+head(top_players, 5)
+
+# ---------------------------------
+# 5th question
+# ---------------------------------
+
+# 5a
+quakes <- quakes
+
+# 5b
+par(mfrow=c(1,1))
+plot(quakes$mag, quakes$depth)
+
+# 5c
+quakeAvgDepth <- aggregate(depth ~ mag, data = quakes, mean)
+
+# 5d
+names(quakeAvgDepth)[2] <- "AvgDepth"
+names(quakeAvgDepth)
+
+# 5e
+plot(quakeAvgDepth$mag,quakeAvgDepth$AvgDepth, 
+     xlab = "magnitude of earthquakes", ylab = "average Depth")
+
+# 5f
+# From the plots we can say that as magnitude increases the depth decreases.
+# I believe there is a reason for this,so I spent sometime surfing the web.
+# It seems that higher magnitude quakes on higher 
+# depths are less harmful towards earths surface.
+# So You could say that the data only contains 
+# earthquakes which cause substantial damage to property on surface.
+
+

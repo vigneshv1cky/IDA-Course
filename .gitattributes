@@ -1,0 +1,2 @@
+touch .gitattributes
+echo "* text=auto" >> .gitattributes

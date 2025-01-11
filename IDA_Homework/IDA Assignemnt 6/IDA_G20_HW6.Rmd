@@ -1,0 +1,1035 @@
+---
+title: "IDA-HW6-Group 20"
+output: pdf_document
+author: " Vignesh Murugan , Vivek Satya Sai Veera Venkata Talluri and Bhuvanesh So Muruganandam "
+date: "2024-10-22"
+---
+
+```{r include=FALSE}
+library(tidyverse)
+library(gridExtra)
+library(VIM)
+library(e1071)
+library(caret)
+library(car)
+library(MASS)
+library(pls)
+library(glmnet)
+library(mice)
+library(knitr)
+```
+
+# (a) (50 points) Preparation and modeling.
+
+### i. (10 points) Data understanding. Generate a Data Quality Report. Also, choose at least two meaningful visualizations and/or analyses and explain their relevance.
+ 
+# Loading and Inspecting Data
+
+The dataset is loaded and converted into a tibble for better handling and integration with the tidyverse ecosystem. Only numeric columns are retained in a new subset for statistical summaries and modeling purposes.
+
+
+```{r include=FALSE}
+Train <- read_csv("2024-ise-dsa-5103-ida-hw-6/Train.csv/Train.csv", show_col_types = FALSE)
+
+Train <- as_tibble(Train)
+
+Train_Numeric <- Train %>% select_if(is.numeric)
+```
+
+Displaying Column Names:
+
+The column names are listed. This allows a quick inspection of which numeric features were extracted, helping ensure the correct columns were selected for further analysis or modeling.
+
+```{r echo=FALSE}
+colnames(Train_Numeric) 
+```
+
+# Summary Statistics of Numeric Features
+
+This function computes the following summary statistics for a given numeric vector:
+n – Total number of observations.
+unique – Number of unique values.
+missing – Count of missing values.
+mean – Average value (ignoring missing data).
+min – Minimum value.
+Q1 – First quartile.
+median – Median value.
+Q3 – Third quartile.
+max – Maximum value.
+sd – Standard deviation.
+
+This produces a comprehensive summary of the numeric features, including key statistics, missing values, and uniqueness percentages. This summary provides valuable insights into the dataset's structure, completeness, and variability, helping to inform data cleaning and feature engineering decisions before modeling.
+
+
+```{r include=FALSE}
+Q1 <- function(x, na.rm = TRUE) quantile(x, na.rm = na.rm)[2]
+Q3 <- function(x, na.rm = TRUE) quantile(x, na.rm = na.rm)[4]
+
+myNumericSummary <- function(x) {
+  c(length(x), n_distinct(x), sum(is.na(x)), mean(x, na.rm = TRUE),
+    min(x, na.rm = TRUE), Q1(x, na.rm = TRUE), median(x, na.rm = TRUE),
+    Q3(x, na.rm = TRUE), max(x, na.rm = TRUE), sd(x, na.rm = TRUE))
+}
+
+numericSummary <- Train_Numeric %>%
+  reframe(across(everything(), myNumericSummary)) %>%
+  cbind(stat = c("n", "unique", "missing", "mean", "min","Q1", "median", "Q3", "max", "sd")) %>%
+  pivot_longer("sessionId":"revenue", names_to = "variable", values_to = "value") %>%
+  pivot_wider(names_from = stat, values_from = value) %>%
+  mutate(n = as.numeric(n), unique = as.numeric(unique), missing = as.numeric(missing),
+    missing_pct = 100 * missing / n, unique_pct = 100 * unique / n) %>%
+  dplyr::select(variable, n, missing, missing_pct, 
+                unique, unique_pct, everything())
+
+```
+
+```{r echo=FALSE}
+numericSummary
+```
+
+# Columns with Excessive Missing Values:
+The features adwordsClickInfo.page, bounces, and newVisits contain missing values in more than 50% of the samples. Retaining these columns could introduce bias and reduce the effectiveness of downstream models. Therefore, these features will be dropped to ensure the integrity of the analysis and maintain the reliability of insights.
+
+# Dropping sessionId:
+The sessionId field contains unique values for each observation, providing no meaningful information for modeling or analysis. As it functions purely as an identifier, it does not contribute to feature engineering or prediction and will be excluded from further processing.
+
+```{r include=FALSE}
+
+Train_Numeric <- Train_Numeric %>% 
+  dplyr::select(-c(adwordsClickInfo.page, bounces, newVisits, sessionId))
+
+numericSummary <- Train_Numeric %>%
+  reframe(across(everything(), myNumericSummary)) %>%
+  cbind(stat = c("n", "unique", "missing", "mean", "min", "Q1", "median", "Q3", "max", "sd")) %>%
+  pivot_longer("custId":"revenue", names_to = "variable", values_to = "value") %>%
+  pivot_wider(names_from = stat, values_from = value) %>%
+  mutate(n = as.numeric(n),unique = as.numeric(unique),missing = as.numeric(missing),
+    missing_pct = 100 * missing / n, unique_pct = 100 * unique / n) %>%
+  dplyr::select(variable, n, missing, missing_pct, unique, 
+                unique_pct, everything())
+
+```
+
+```{r echo=FALSE}
+numericSummary
+```
+
+The pageviews column contains 0.0114% missing values, a relatively small proportion of the dataset. To maintain the data quality without discarding valuable information, we will apply K-Nearest Neighbors (KNN) imputation from the VIM package.
+
+KNN imputation is chosen as it leverages the similarity between data points, providing more accurate estimates by filling in missing values based on the closest neighbors. This approach ensures consistency and avoids introducing bias from simpler imputations like mean or median.
+
+```{r include=FALSE}
+Train_Numeric <- kNN(Train_Numeric, variable = c("pageviews"), k = 5, imp_var = FALSE)
+
+numericSummary <- Train_Numeric %>%
+  reframe(across(everything(), myNumericSummary)) %>%
+  cbind(stat = c("n", "unique", "missing", "mean", "min", "Q1", "median", "Q3", "max", "sd")) %>%
+  pivot_longer("custId":"revenue", names_to = "variable", values_to = "value") %>%
+  pivot_wider(names_from = stat, values_from = value) %>%
+  mutate(n = as.numeric(n),unique = as.numeric(unique),missing = as.numeric(missing),
+         missing_pct = 100 * missing / n, unique_pct = 100 * unique / n) %>%
+  dplyr::select(variable, n, missing, missing_pct, unique, 
+                unique_pct, everything())
+```
+
+
+```{r echo=FALSE}
+numericSummary
+```
+
+We will plot histograms to examine the distribution of the variables. From the visual inspection, most variables exhibit a right-skewed distribution.
+
+A right-skew indicates that the majority of the data points are concentrated on the lower end, with a long tail extending towards higher values. This suggests that further transformations (e.g., log or Box-Cox transformation) may be necessary to normalize the data for certain machine learning models that assume normally distributed input features.
+
+```{r include=FALSE}
+
+plot_histogram <- function(column_data, column_name) {
+  ggplot(data = tibble(value = column_data), aes(x = value, fill = ..count..)) +
+    geom_histogram(bins = 100, color = "black") +
+    scale_fill_gradient(low = "skyblue", high = "black") +
+    labs(title = paste("Histogram of", column_name), 
+         x = column_name, 
+         y = "Frequency")
+}
+
+```
+
+```{r echo=FALSE}
+map2(Train_Numeric, names(Train_Numeric), plot_histogram)
+```
+
+
+
+2. Factor Variables
+
+Summarizes key statistics for factor variables, including:
+Total number of observations.
+Number of unique values.
+Count of missing values.
+Most frequent (1st mode) and its frequency.
+Second most frequent value and its frequency.
+Least common value and its frequency.
+
+```{r pressure, include=FALSE}
+getmodes <- function(v,type=1) {
+  tbl <- table(v)
+  m1<-which.max(tbl)
+  if (type==1) {
+    return (names(m1)) #1st mode
+  }
+  else if (type==2) {
+    return (names(which.max(tbl[-m1]))) #2nd mode
+  }
+  else if (type==-1) {
+    return (names(which.min(tbl))) #least common mode
+  }
+  else {
+    stop("Invalid type selected")
+  }
+}
+
+getmodesCnt <- function(v,type=1) {
+  tbl <- table(v)
+  m1<-which.max(tbl)
+  if (type==1) {
+    return (max(tbl)) #1st mode freq
+  }
+  else if (type==2) {
+    return (max(tbl[-m1])) #2nd mode freq
+  }
+  else if (type==-1) {
+    return (min(tbl)) #least common freq
+  }
+  else {
+    stop("Invalid type selected")
+  }
+}
+
+myFactorSummary <- function(x) {
+  c(length(x), n_distinct(x), sum(is.na(x)), getmodes(x, type = 1),
+    getmodesCnt(x, type = 1), getmodes(x, type = 2), getmodesCnt(x, type = 2),
+    getmodes(x, type = -1), getmodesCnt(x, type = -1))
+}
+```
+
+
+```{r echo=FALSE}
+Train_Factor <- Train %>% 
+  select_if(is.character) %>% 
+  transmute_if(is.character, as.factor)  # Convert character to factor
+```
+
+
+Displaying Column Names:
+The column names of Train_Factor are listed using colnames(). This allows a quick inspection of which Factor features were extracted, helping ensure the correct columns were selected for further analysis or modeling.
+
+```{r echo=FALSE}
+names(Train_Factor)
+
+```
+
+```{r include = FALSE}
+
+Factor_missing_summary <- Train_Factor %>%
+  summarise(across(everything(), ~ mean(is.na(.)) * 100)) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "missing_pct") %>%
+  arrange(desc(missing_pct))
+
+```
+
+```{r echo=FALSE}
+Factor_missing_summary
+```
+
+# ii. (10 points) Data preparation. Choose two of the most critical data preparation actions you took and explain the reasoning for these actions.
+
+The listed columns are removed from the dataset because they contain a high percentage of missing values, as outlined below:
+adContent: 98.8% missing
+adwordsClickInfo.slot: 97.4% missing
+adwordsClickInfo.adNetworkType: 97.4% missing
+keyword: 96.2% missing
+city: 55.7% missing
+These features have limited useful information because most values are missing.
+
+Features with missing percentages over 50% (or close to it) are generally considered unreliable for analysis. Imputation becomes impractical for such features, as filling in so many missing values could introduce significant bias or noise.
+
+Dropping these columns ensures that the dataset is cleaner and more reliable for analysis, reducing the risk of errors in downstream tasks such as model training.
+
+```{r include = FALSE}
+
+Train_Factor <- Train_Factor %>% 
+  dplyr::select(-c(adContent, adwordsClickInfo.slot, 
+                   adwordsClickInfo.adNetworkType, adwordsClickInfo.adNetworkType,
+                   adwordsClickInfo.gclId, keyword, campaign, metro, 
+                   referralPath, city, region, networkDomain, topLevelDomain))
+```
+
+```{r include = FALSE}
+
+plot_barplot <- function(column_data, column_name) {
+  ggplot(data = tibble(value = column_data), aes(x = value, fill = value)) +
+    geom_bar(color = "black", width = 0.7) +
+    scale_fill_manual(values = scales::hue_pal()(length(unique(column_data)))) +
+    labs(
+      title = paste("Barplot of", column_name), 
+      x = column_name, 
+      y = "Frequency"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "none"  # Removes the legend
+    )
+}
+
+```
+
+The Barplot of All Factor Variables are plotted.
+
+```{r include = FALSE}
+map2(Train_Factor, names(Train_Factor), plot_barplot)
+```
+
+The Factor Levels of all Factor Varibales are printed.
+
+```{r echo=FALSE}
+factor_levels <- map(Train_Factor, ~fct_count(.x, sort = TRUE))
+```
+
+```{r include = FALSE}
+factor_levels
+```
+
+### ii. (10 points) Data preparation. Choose two of the most critical data preparation actions you took and explain the reasoning for these actions.
+
+# Feature Engineering with Factor Variables:
+In the following steps, we are lumping factor levels using the fct_lump_n() function from the forcats package. This technique groups less frequent categories into an "Other" level to reduce the dimensionality of categorical features, making models more efficient and interpretable. Below is the summary of the transformations:
+
+channelGrouping – Retained the 4 most frequent levels; all other levels are grouped under "Other."
+browser – Retained the 2 most frequent levels; the rest are grouped into "Other."
+operatingSystem – Retained the 6 most frequent levels, grouping the remainder as "Other."
+source – Retained the 4 most frequent levels, with the rest lumped into "Other."
+medium – Retained the 3 most frequent levels; all other levels are merged into "Other."
+country – Retained only the 1 most frequent country; all others are grouped as "Other."
+subContinent – Retained the 1 most frequent sub-continent; all others are grouped into "Other."
+continent – Retained the 3 most frequent continents, with the remaining grouped into "Other."
+This lumping process helps simplify complex categorical data by consolidating rare categories, improving the performance of downstream models while maintaining the most important information. After each transformation, fct_count() is used to display the new count of each factor level.
+
+The subContinent column is being removed from the Train_Factor dataset because it is identical to the Country column, meaning it offers no additional value or new information for analysis.
+
+The hot-deck imputation method is applied to Train_Factor using the hotdeck() function. This method replaces missing values with those from similar records within the dataset.
+
+
+
+```{r include = FALSE}
+Train_Factor$channelGrouping <- fct_lump_n(Train_Factor$channelGrouping , n = 4)
+fct_count(Train_Factor$channelGrouping)
+Train_Factor$browser <- fct_lump_n(Train_Factor$browser , n = 2)
+fct_count(Train_Factor$browser)
+Train_Factor$operatingSystem <- fct_lump_n(Train_Factor$operatingSystem , n = 6)
+fct_count(Train_Factor$operatingSystem)
+Train_Factor$source <- fct_lump_n(Train_Factor$source , n = 4)
+fct_count(Train_Factor$source)
+Train_Factor$medium <- fct_lump_n(Train_Factor$medium , n = 3)
+fct_count(Train_Factor$medium)
+Train_Factor$country <- fct_lump_n(Train_Factor$country , n = 1)
+fct_count(Train_Factor$country)
+Train_Factor$subContinent <- fct_lump_n(Train_Factor$subContinent , n = 1)
+fct_count(Train_Factor$subContinent)
+Train_Factor$continent <- fct_lump_n(Train_Factor$continent , n = 3)
+fct_count(Train_Factor$continent)
+
+Train_Factor <- Train_Factor %>% 
+  dplyr::select(-subContinent)
+
+Train_Factor_imputed <- hotdeck(Train_Factor,imp_var=FALSE)
+
+```
+
+```{r echo=FALSE}
+map2(Train_Factor_imputed, names(Train_Factor_imputed), plot_barplot)
+```
+
+
+```{r echo=FALSE}
+
+# Barplot after imputation
+p1 <- ggplot(data = Train_Factor_imputed, aes(x = medium, fill = medium)) +
+  geom_bar(color = "black", width = 0.7) +
+  scale_fill_manual(values = scales::hue_pal()(length(unique(Train_Factor_imputed$medium)))) +
+  ylim(c(0, 35000)) +
+  labs(title = "Barplot after imputation") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+
+# Barplot before imputation
+p2 <- ggplot(data = Train_Factor, aes(x = medium, fill = medium)) +
+  geom_bar(color = "black", width = 0.7) +
+  scale_fill_manual(values = scales::hue_pal()(length(unique(Train_Factor$medium)))) +
+  ylim(c(0, 35000)) +
+  labs(title = "Barplot before imputation") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+
+# Arrange the two plots side by side
+grid.arrange(p1, p2, ncol = 2)
+
+Factor_imputed_missing_summary <- Train_Factor_imputed %>%
+  summarise(across(everything(), ~ mean(is.na(.)) * 100)) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "missing_pct") %>%
+  arrange(desc(missing_pct))
+```
+
+The date column from the Train dataset is selected and then combined with Train_Numeric and Train_Factor_imputed using bind_cols(). This creates a consolidated dataset named Final_Data containing the date, numeric, and factor variables.
+This step ensures that all relevant features from different sources are merged into a single data frame for further analysis.
+
+```{r echo=FALSE}
+Final_Data <- Train %>%
+  dplyr::select(date) %>%                       # Select 'date' column
+  bind_cols(Train_Numeric, Train_Factor_imputed)  # Join numeric and factor data
+
+names(Final_Data)
+
+colSums(is.na(Final_Data))
+
+Final_Data <- Final_Data %>%
+  mutate(
+    day_of_week = wday(date, label = TRUE),  # Extract day of the week
+    cust_lag_visit = lag(visitNumber, order_by = visitStartTime),  # Previous visit number
+    consecutive_visits = ifelse(visitNumber == cust_lag_visit + 1, 1, 0)  # Check consecutive
+  )
+```
+
+
+```{r echo=FALSE}
+customer_features <- Final_Data %>%
+  group_by(custId) %>%
+  summarise(
+    log_total_revenue = log1p(sum(revenue)),  # log(1 + total_revenue)
+    total_visits = n(),
+    avg_pageviews_per_visit = mean(pageviews),
+    days_between_first_last_visit = as.numeric(max(date) - min(date)),
+    different_day_visits = n_distinct(date),  # Number of unique visit days
+    total_sessions = max(visitNumber),  # Total sessions per customer
+    avg_session_num = mean(visitNumber),
+    avg_time_since_last = mean(timeSinceLastVisit),
+    max_time_since_last = max(timeSinceLastVisit),
+    mobileUsage = mean(isMobile),
+    directVisits = mean(isTrueDirect),
+    pageviews = sum(pageviews),
+    mostCommonBrowser = names(sort(table(browser), decreasing = TRUE)[1]),
+    mostCommonOS = names(sort(table(operatingSystem), decreasing = TRUE)[1]),
+    mostCommonDevice = names(sort(table(deviceCategory), decreasing = TRUE)[1]),
+    primaryChannel = names(sort(table(channelGrouping), decreasing = TRUE)[1]),
+    mostFrequentContinent = names(sort(table(continent), decreasing = TRUE)[1]),
+    mostFrequentCountry = names(sort(table(country), decreasing = TRUE)[1]),
+    primarySource = names(sort(table(source), decreasing = TRUE)[1]),
+    primaryMedium = names(sort(table(medium), decreasing = TRUE)[1]),
+    mostCommonDay = names(sort(table(day_of_week), decreasing = TRUE)[1])  #Most frequent day of visit
+  )
+```
+
+# Aggregated customer Specific Dataset
+
+The dataset Final_Data is grouped by the unique customer identifier custId.
+This allows aggregation of customer-related metrics across multiple sessions or visits.
+
+### log_total_revenue:
+Computes the log-transformed total revenue for each customer using log1p(). log(1+x) to avoid log(0) issues).
+
+### total_visits:
+Counts the total number of visits by each customer (n()).
+
+### avg_pageviews_per_visit:
+Averages the number of page views per visit for each customer.
+
+### days_between_first_last_visit:
+Calculates the time difference between the first and last visit.
+
+### different_day_visits:
+Counts how many unique days a customer has visited (n_distinct()).
+
+### total_sessions:
+Finds the highest recorded session number (max()) to represent total sessions.
+
+### avg_session_num:
+Averages the session number to understand session frequency.
+
+### avg_time_since_last & max_time_since_last:
+Calculates the average and maximum time between successive visits.
+
+### mobileUsage & directVisits:
+Computes the average proportion of visits made from mobile devices and through direct access.
+
+### pageviews:
+Aggregates the total number of page views by each customer.
+
+### mostCommonBrowser, mostCommonOS, and mostCommonDevice:
+Finds the most frequently used browser, operating system, and device category across the customer’s visits.
+
+### primaryChannel:
+Identifies the most used marketing channel for each customer.
+
+### mostFrequentContinent & mostFrequentCountry:
+Determines the most frequent continent and country from which the customer accessed the website.
+
+### primarySource & primaryMedium:
+Extracts the most frequent traffic source and medium used by the customer.
+
+### mostCommonDay:
+Finds the day of the week on which the customer most frequently visited.
+
+```{r echo=FALSE}
+names(customer_features)
+```
+
+```{r echo=FALSE}
+customer_features_Numeric <- customer_features %>% select_if(is.numeric)
+
+# Remove specific columns from the numeric dataset
+customer_features_Numeric <- customer_features_Numeric %>%
+  dplyr::select(-c(log_total_revenue, custId))
+```
+
+Selecting Only Numeric Features:
+A subset of the data is created, focusing only on numeric columns.
+Excluding non-numeric columns ensures that the remaining features are suitable for statistical techniques or machine learning algorithms.
+
+Excluding Specific Columns:
+The code removes the log_total_revenue and custId columns because:
+custId is a unique identifier, not useful for analysis.
+
+log_total_revenue is excluded to avoid data leakage as it's the target variable in a predictive model.
+
+```{r echo=FALSE}
+
+# Display the names of the remaining numeric columns
+names(customer_features_Numeric)
+
+```
+
+
+```{r include = FALSE}
+# Compute Summary of Numeric Data
+customer_features_numericSummary <- customer_features_Numeric %>%
+  reframe(across(everything(), myNumericSummary)) %>%
+  cbind(stat = c("n", "unique", "missing", "mean", "min", "Q1", "median", "Q3", "max", "sd")) %>%
+  pivot_longer("total_visits":"total_visits", names_to = "variable", values_to = "value") %>%
+  pivot_wider(names_from = stat, values_from = value) %>%
+  mutate(n = as.numeric(n), unique = as.numeric(unique),
+         missing = as.numeric(missing), missing_pct = 100 * missing / n,
+         unique_pct = 100 * unique / n) %>%
+  dplyr::select(variable, n, missing, missing_pct, 
+                unique, unique_pct, everything())
+
+# Computing the skewness of variables and Sorting them
+skewValues_tibble <- customer_features_Numeric %>%
+  summarise(across(everything(), ~ skewness(.x, na.rm = TRUE))) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Skewness") %>%
+  arrange(Skewness)
+
+```
+
+### ii. (10 points) Data preparation. Choose two of the most critical data preparation actions you
+took and explain the reasoning for these actions.
+
+# Test for Skewness
+
+Computing skewness for each variable in the customer_features_Numeric dataset.
+
+Skewness is computed for all variables while ignoring missing values. The results are organized and sorted by skewness values to identify which variables have significant positive or negative skew. These insights can help inform further data preprocessing steps, such as transformations (e.g., log or Box-Cox) to normalize skewed distributions or detect potential outliers.
+
+```{r echo=FALSE}
+# Print skewness values for all variables
+print(skewValues_tibble, n = Inf)
+```
+
+## ii. (10 points) Data preparation. Choose two of the most critical data preparation actions you took and explain the reasoning for these actions.
+
+# BoxCox Tranformations
+
+Box-Cox transformation is applied to multiple numeric features to reduce skewness and make distributions more normal-like.
+
+Adding 1 to certain variables (e.g., mobileUsage + 1) ensures there are no zero values, as the Box-Cox transformation only works on positive values.
+
+Purpose: This transformation stabilizes variance and makes the data more suitable for statistical models (e.g., linear regression).
+
+
+```{r echo=FALSE}
+BoxCoxTrans(customer_features_Numeric$mobileUsage+1)
+BoxCoxTrans(customer_features_Numeric$directVisits+1)
+BoxCoxTrans(customer_features_Numeric$avg_pageviews_per_visit)
+BoxCoxTrans(customer_features_Numeric$days_between_first_last_visit+1)
+BoxCoxTrans(customer_features_Numeric$max_time_since_last+1)
+BoxCoxTrans(customer_features_Numeric$avg_time_since_last+1)
+BoxCoxTrans(customer_features_Numeric$pageviews)
+BoxCoxTrans(customer_features_Numeric$different_day_visits)
+BoxCoxTrans(customer_features_Numeric$total_sessions)
+BoxCoxTrans(customer_features_Numeric$avg_session_num)
+BoxCoxTrans(customer_features_Numeric$total_visits)
+```
+
+# Histograms visualize the distribution of each numeric feature before transformation.
+
+The purpose is to inspect skewness—whether the distribution is symmetric or skewed to the left/right—and assess the need for transformations.
+
+
+```{r echo=FALSE}
+hist(customer_features_Numeric$mobileUsage)
+hist(customer_features_Numeric$directVisits)
+hist(customer_features_Numeric$avg_pageviews_per_visit)
+hist(customer_features_Numeric$days_between_first_last_visit)
+hist(customer_features_Numeric$max_time_since_last)
+hist(customer_features_Numeric$avg_time_since_last)
+hist(customer_features_Numeric$pageviews)
+hist(customer_features_Numeric$different_day_visits)
+hist(customer_features_Numeric$total_sessions)
+hist(customer_features_Numeric$avg_session_num)
+hist(customer_features_Numeric$total_visits)
+```
+
+# Histograms visualize the distribution of each numeric feature after transformation.
+
+Power transformations (e.g., raising variables to negative exponents) are applied to address skewness further.
+
+This operation reshapes distributions to be closer to normal. The transformed histograms help confirm if the transformation has successfully reduced skewness.
+
+```{r echo=FALSE}
+hist((customer_features_Numeric$mobileUsage+1)**(-2))
+hist((customer_features_Numeric$directVisits+1)**(-2))
+hist((customer_features_Numeric$avg_pageviews_per_visit)**(-0.6))
+hist((customer_features_Numeric$days_between_first_last_visit+1)**(-2))
+hist((customer_features_Numeric$max_time_since_last+1)**(-0.4))
+hist((customer_features_Numeric$avg_pageviews_per_visit)**(-0.5))
+hist((customer_features_Numeric$pageviews)**(-0.5))
+hist((customer_features_Numeric$different_day_visits)**(-2))
+hist((customer_features_Numeric$total_sessions)**(-2))
+hist((customer_features_Numeric$avg_session_num)**(-2))
+hist((customer_features_Numeric$total_visits)**(-2))
+```
+
+The numeric dataset is updated in place with the transformed variables. These transformations are applied to variables like mobileUsage, pageviews, and total_visits.
+
+Purpose: This ensures that future analyses or models will use the normalized data to improve model performance and interpretability.
+
+```{r echo=FALSE}
+customer_features_Numeric$mobileUsage <- (customer_features_Numeric$mobileUsage+1)**(-2)
+customer_features_Numeric$directVisits <- (customer_features_Numeric$directVisits+1)**(-2)
+customer_features_Numeric$avg_pageviews_per_visit <- (customer_features_Numeric$avg_pageviews_per_visit)**(-0.6)
+customer_features_Numeric$days_between_first_last_visit <- (customer_features_Numeric$days_between_first_last_visit+1)**(-2)
+customer_features_Numeric$max_time_since_last <- (customer_features_Numeric$max_time_since_last+1)**(-0.4)
+customer_features_Numeric$avg_pageviews_per_visit <- (customer_features_Numeric$avg_pageviews_per_visit)**(-0.5)
+customer_features_Numeric$pageviews <- (customer_features_Numeric$pageviews)**(-0.5)
+customer_features_Numeric$different_day_visits <- (customer_features_Numeric$different_day_visits)**(-2)
+customer_features_Numeric$total_sessions <- (customer_features_Numeric$total_sessions)**(-2)
+customer_features_Numeric$avg_session_num <- (customer_features_Numeric$avg_session_num)**(-2)
+customer_features_Numeric$total_visits <- (customer_features_Numeric$total_visits)**(-2)
+```
+
+# Data Centering and Scaling
+
+This process involves several steps to prepare and explore customer data for analysis. First, numeric data is centered and scaled to ensure that all features have zero mean and unit variance, which improves the performance of models sensitive to feature magnitude. Important features, like log_total_revenue, are added back to the transformed dataset, while some columns, such as directVisits, are removed to avoid redundancy.
+
+Next, character columns are converted into factors, making them compatible with models that handle categorical data. These transformed numeric and categorical datasets are combined to form a comprehensive dataset, ready for further analysis. 
+
+
+```{r echo = FALSE}
+
+# Preprocess the numeric data: center and scale
+preProcess_obj <- preProcess(customer_features_Numeric, 
+                             method = c("center", "scale"))
+
+# Transform the data using the preprocessing object
+customer_features_Numeric <- predict(preProcess_obj, customer_features_Numeric)
+
+# Add log_total_revenue back to the transformed data and Remove directVisits 
+customer_features_Numeric <- customer_features_Numeric %>%
+  mutate(log_total_revenue = customer_features$log_total_revenue) %>% 
+  dplyr::select(-directVisits)
+
+# Transform character columns into factors
+customer_features_Factor <- customer_features %>% 
+  transmute_if(is.character, as.factor)
+
+# Combine numeric and factor features into a final dataset
+Final_customer_features <- customer_features_Numeric %>% 
+  bind_cols(customer_features_Factor)
+
+# Display the names of the final features
+names(Final_customer_features)
+```
+
+### Scatter plots are used to explore relationships between log_total_revenue and various features, helping identify potential correlations or patterns between revenue and customer behavior metrics.
+
+```{r echo = FALSE}
+
+# Function to create scatter plots
+plot_scatter <- function(x, y, xlab, ylab, title) {
+  plot(x, y, 
+       main = title, 
+       xlab = xlab, 
+       ylab = ylab)
+}
+
+# Create scatter plots to visualize relationships between log_total_revenue and other features
+plot_scatter(Final_customer_features$log_total_revenue, Final_customer_features$total_visits,
+             "log_total_revenue", "total_visits", "log_total_revenue vs total_visits")
+
+plot_scatter(Final_customer_features$log_total_revenue, Final_customer_features$avg_pageviews_per_visit,
+             "log_total_revenue", "avg_pageviews_per_visit", "log_total_revenue vs avg_pageviews_per_visit")
+
+plot_scatter(Final_customer_features$log_total_revenue, Final_customer_features$days_between_first_last_visit,
+             "log_total_revenue", "days_between_first_last_visit", "log_total_revenue vs days_between_first_last_visit")
+
+plot_scatter(Final_customer_features$log_total_revenue, Final_customer_features$different_day_visits,
+             "log_total_revenue", "different_day_visits", "log_total_revenue vs different_day_visits")
+
+plot_scatter(Final_customer_features$log_total_revenue, Final_customer_features$total_sessions,
+             "log_total_revenue", "total_sessions", "log_total_revenue vs total_sessions")
+
+plot_scatter(Final_customer_features$log_total_revenue, Final_customer_features$avg_session_num,
+             "log_total_revenue", "avg_session_num", "log_total_revenue vs avg_session_num")
+
+plot_scatter(Final_customer_features$log_total_revenue, Final_customer_features$avg_time_since_last,
+             "log_total_revenue", "avg_time_since_last", "log_total_revenue vs avg_time_since_last")
+
+plot_scatter(Final_customer_features$log_total_revenue, Final_customer_features$max_time_since_last,
+             "log_total_revenue", "max_time_since_last", "log_total_revenue vs max_time_since_last")
+
+plot_scatter(Final_customer_features$log_total_revenue, Final_customer_features$mobileUsage,
+             "log_total_revenue", "mobileUsage", "log_total_revenue vs mobileUsage")
+# 
+# plot_scatter(Final_customer_features$log_total_revenue, Final_customer_features$directVisits,
+#              "log_total_revenue", "directVisits", "log_total_revenue vs directVisits")
+
+plot_scatter(Final_customer_features$log_total_revenue, Final_customer_features$pageviews,
+             "log_total_revenue", "pageviews", "log_total_revenue vs pageviews")
+
+```
+
+Finally, the dataset is checked for missing values to ensure it is complete and ready for modeling. This workflow ensures the data is well-prepared, clean, and properly structured, setting a solid foundation for future predictive analysis or machine learning tasks.
+
+```{r echo = FALSE}
+
+colSums(is.na(Final_customer_features))
+```
+
+# Handling multicollinearity
+
+Now we focuses on **handling multicollinearity** within the dataset to ensure the quality and reliability of statistical models. Multicollinearity occurs when independent variables are highly correlated, which can inflate the variance of regression coefficients and make the model unstable. 
+
+The first step involves fitting an **Ordinary Least Squares (OLS) regression model** using all the features to predict `log_total_revenue`. Diagnostic plots are generated to check for any unusual patterns or violations of regression assumptions, such as non-linearity or heteroscedasticity. Additionally, **outliers** are identified using statistical tests to see if any extreme data points are influencing the model's results.
+
+The model exhibits non-linearity. Although there are some outliers present in the data, their removal is not critical, as they do not exert significant leverage on the model's performance or predictions.
+
+
+```{r echo=FALSE}
+#################################################
+# Handling multicollinearity
+#################################################
+
+ols_fit_lm <- lm(log_total_revenue ~ .,
+                 data = Final_customer_features)
+
+plot(ols_fit_lm)
+```
+
+### Performing Outlier Tests :
+
+There are outliers, But they dont have leverage.So We will not be removing any samples.
+```{r echo=FALSE}
+outlierTest(ols_fit_lm)
+```
+
+### Performing Multicollearity Tests:
+
+Variables with vif>10 are removed.
+
+```{r echo=FALSE}
+car::vif(ols_fit_lm)
+
+```
+
+The **Variance Inflation Factor (VIF)** is then computed to assess multicollinearity. A VIF value greater than 10 indicates that a variable is highly correlated with others in the model. In this case, variables with high VIF scores—such as `mobileUsage`, `total_sessions`, and `avg_session_num`—are removed to reduce multicollinearity and improve the stability of the model.
+
+Next, a **correlation matrix** is computed to quantify the pairwise correlations between numeric variables, and both a **heatmap** and a **correlation plot** are generated for visualization. These plots help identify highly correlated pairs of variables, guiding further feature selection and dimensionality reduction.
+
+The high-VIF variables identified earlier are removed from the dataset to create a refined version of the feature set. This process ensures that the dataset is free of problematic multicollinearity, improving the interpretability and predictive performance of subsequent models.
+
+```{r echo=FALSE}
+# Remove high-VIF variables (starting with mobileUsage, total_sessions, and avg_session_num)
+Final_customer_features_reduced <- Final_customer_features %>%
+  dplyr::select(-c(mobileUsage, total_sessions, days_between_first_last_visit,
+                   total_visits))
+
+# Compute the correlation matrix of numerical variables
+cor_matrix <- cor(Final_customer_features[, sapply(Final_customer_features, is.numeric)])
+
+# Print the correlation matrix
+heatmap(cor_matrix)
+
+corrplot::corrplot(cor_matrix,method = "color")
+
+# Remove high-VIF variables (starting with mobileUsage, total_sessions, and avg_session_num)
+Final_customer_features <- Final_customer_features %>%
+  dplyr::select(-c(mobileUsage, total_sessions, days_between_first_last_visit,
+                   total_visits))
+```
+
+### AFter Removing varibales with VIF > 10
+
+```{r echo=FALSE}
+# Compute the correlation matrix of numerical variables
+cor_matrix <- cor(Final_customer_features[, sapply(Final_customer_features, is.numeric)])
+
+# Print the correlation matrix
+heatmap(cor_matrix)
+
+corrplot::corrplot(cor_matrix,method = "color")
+
+```
+
+# MODELLING
+
+# iii. (20 points) Modeling. Build an OLS model and 3 or more regression variant models (these may include robust regression, PLS, PCR, ridge regression, LASSO, elasticnet, MARS, or SVR) and summarize their performance in a table (as shown in Table 1). Clearly state your resampling approach. Note: You may combine models, techniques, etc.
+
+10 Fold Cross Validation is used.
+
+# OLS (Ordinary Least Squares Regression) :
+Trains linear models with different subsets of features.
+Uses 10-fold cross-validation to avoid overfitting.
+
+```{r echo= FALSE}
+#################################################
+# Lets Build Models
+#################################################
+
+# Perform 10-fold cross-validation using caret
+cv_control <- trainControl(method = "cv", number = 10)
+
+# OLS
+ols_fit <- train(log_total_revenue ~ .,
+                   data = Final_customer_features, 
+                   method = "lm", 
+                   trControl = cv_control)
+ols_fit
+min(ols_fit$results$RMSE)
+summary(ols_fit)
+
+```
+
+# Lasso Regression:
+Applies L1 regularization to encourage sparsity, reducing less impactful features.
+Hyperparameter tuning: fraction controls the penalty strength, with a grid search across values.
+
+```{r echo=FALSE}
+
+#################################################
+# Lasso
+lasso_fit <- train(log_total_revenue ~ .,
+                   data = Final_customer_features, 
+                   method = "lasso", 
+                   trControl = cv_control,
+                   tuneLength = 20)
+lasso_fit
+plot(lasso_fit)
+
+# Lasso
+lasso_grid <- expand.grid(fraction = seq(0.85,1,length=100))
+lasso_fit <- train(log_total_revenue ~ .,
+                 data = Final_customer_features, 
+                 method = "lasso", 
+                 trControl = cv_control,
+                 tuneGrid = lasso_grid)
+lasso_fit
+plot(lasso_fit)
+min(lasso_fit$results$RMSE)
+
+```
+
+# PLS (Partial Least Squares Regression)
+Useful for handling multicollinearity and dimensionality reduction.
+Hyperparameter tuning: Number of components (ncomp) optimized to minimize RMSE.
+
+```{r echo=FALSE}
+
+#################################################
+# PLS
+pls_fit <- train(log_total_revenue ~ .,
+                   data = Final_customer_features, 
+                   method = "pls", 
+                   trControl = cv_control,
+                 tuneLength = 20)
+pls_fit
+plot(pls_fit)
+
+pls_grid <- expand.grid(ncomp = seq(25,35,length=100))
+pls_fit <- train(log_total_revenue ~ .,
+                   data = Final_customer_features, 
+                   method = "pls", 
+                   trControl = cv_control,
+                   tuneGrid = pls_grid)
+pls_fit
+plot(pls_fit)
+min(pls_fit$results$RMSE)
+
+```
+
+# ElasticNet Regression (glmnet) :
+Combines Lasso (L1) and Ridge (L2) penalties, balancing feature selection and shrinkage.
+Hyperparameter tuning: alpha (mixing parameter) and lambda (regularization strength).
+
+```{r echo=FALSE}
+
+#################################################
+# ElasticNet
+glmnet_fit <- train(log_total_revenue ~ .,
+                 data = Final_customer_features, 
+                 method = "glmnet", 
+                 trControl = cv_control,
+                 tuneLength = 5)
+glmnet_fit
+plot(glmnet_fit)
+
+# ElasticNet
+glmnet_grid <- expand.grid( alpha = seq(0.8, 1, length = 10), 
+  lambda = seq(0, 0.1, length = 10) 
+)
+
+glmnet_fit <- train(log_total_revenue ~ .,
+                 data = Final_customer_features, 
+                 method = "glmnet", 
+                 trControl = cv_control,
+                 tuneGrid = glmnet_grid)
+glmnet_fit
+plot(glmnet_fit)
+min(glmnet_fit$results$RMSE)
+
+```
+
+# PCR (Principal Component Regression):
+Performs PCA before regression, handling multicollinearity.
+Hyperparameter tuning: Number of principal components (ncomp).
+
+```{r echo=FALSE}
+
+#################################################
+# PCR
+PCR_fit <- train(log_total_revenue ~ .,
+                   data = Final_customer_features, 
+                   method = "pcr", 
+                   trControl = cv_control,
+                   tuneLength = 20)
+PCR_fit
+plot(PCR_fit)
+
+# PCR
+PCR_grid <- expand.grid(ncomp = seq(20,35,length=100))
+PCR_fit <- train(log_total_revenue ~ .,
+                   data = Final_customer_features, 
+                   method = "pcr", 
+                   trControl = cv_control,
+                   tuneGrid = PCR_grid)
+PCR_fit
+plot(PCR_fit)
+min(PCR_fit$results$RMSE)
+
+
+```
+
+
+# MARS (Multivariate Adaptive Regression Splines) :
+MARS builds piecewise linear regressions, called splines, for different ranges of the data.
+It automatically selects which variables to use and where to place knots (breakpoints) in the data, making it ideal for datasets with complex, nonlinear relationships.
+MARS is often used when the relationship between variables is unknown or not easily captured by linear models.
+
+```{r echo=FALSE}
+
+#################################################
+# PCR
+
+# MARS
+MARS_fit <- train(log_total_revenue ~ ., 
+                  data = Final_customer_features, 
+                  method = "earth", 
+                  trControl = cv_control,
+                  tuneLength = 20)
+print(MARS_fit)
+plot(MARS_fit)
+
+# MARS
+MARS_grid <- expand.grid(degree = 1,  # Degree of interaction
+                         nprune = seq(8, 20, by = 5))  # Number of terms
+
+MARS_fit <- train(log_total_revenue ~ ., 
+                  data = Final_customer_features, 
+                  method = "earth", 
+                  trControl = cv_control, 
+                  tuneGrid = MARS_grid)
+print(MARS_fit)
+plot(MARS_fit)
+min(MARS_fit$results$RMSE)
+
+```
+
+# Extracting RMSE for All Models:
+The RMSE values are directly extracted and summarized for easy comparison in a data.frame.
+
+```{r echo=FALSE}
+
+#################################################
+
+# Extracting RMSE for each model
+ols_cv_rmse <- min(ols_fit$results$RMSE)
+pls_cv_rmse <- min(pls_fit$results$RMSE)
+lasso_cv_rmse <- min(lasso_fit$results$RMSE)
+glmnet_cv_rmse <- min(glmnet_fit$results$RMSE)
+PCR_cv_rmse <- min(PCR_fit$results$RMSE)
+MARS_cv_rmse <- min(MARS_fit$results$RMSE)
+
+# Summary Data Frame
+model_performance <- data.frame(
+  Model = c("OLS", "PLS", "LASSO", "glmnet", "PCR","MARS"),
+  Hyperparameter = c("None", "ncomp", "alpha=1, lambda", "alpha,Lambda", "ncomp", "degree = 1 , nprune"),
+  CV_RMSE = c(ols_cv_rmse, pls_cv_rmse, lasso_cv_rmse, glmnet_cv_rmse, PCR_cv_rmse, MARS_cv_rmse)
+)
+
+
+options(digits=3)
+options(scipen=99)
+# Display the sorted data frame
+model_performance %>% kable()
+```
+
+# iv. (10 points) Debrief. For your best predictions, describe your approach, e.g., did you examine interactions? did you use any type of model stacking? what was your secret sauce? Did you have any problems during the modeling process? If so, how did you overcome those?
+
+The best performance in my analysis came from using MARS models. This model consistently provided the lowest RMSE during multiple runs, making them my top performers. While I did experiment with interactions and model stacking, I chose to keep the model relatively simple to maintain interpretability and avoid overfitting. Instead of adding more layers of complexity, I focused on feature engineering, which became my “secret sauce” for optimizing the model's performance.
+
+Specifically, I crafted custom variables based on the behavioral data available. Some of the key features I introduced included:
+
+avg_pageviews_per_visit – To capture user engagement patterns.
+days_between_first_last_visit – A measure of how quickly users return to the platform.
+
+max_time_since_last – To account for dormant periods between visits.
+mostCommonBrowser, mostCommonOS, mostCommonDay – Indicators of user preferences across technology and time.
+
+These new variables enhanced the predictive power of the model, providing deeper insights into user behavior. I believe that this feature engineering step was pivotal in boosting model accuracy and stability.
+
+Challenges and Solutions:
+During the modeling process, I faced performance issues—with some models running for hours without completion as the complexity increased. To overcome this, I took several steps:
+
+Dimensionality Reduction: I pruned less relevant features and focused on engineered variables that provided higher information gain.
+
+Optimized Code: I adjusted hyperparameters and reduced batch sizes where appropriate to avoid excessive computation. Additionally, I monitored resource utilization to prevent bottlenecks during execution.
+
+By maintaining a balance between simplicity and precision, I achieved a high-performing model without compromising speed or interpretability.
+

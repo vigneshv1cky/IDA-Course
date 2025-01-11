@@ -1,0 +1,333 @@
+---
+title: "Group23_Ida_homework3 - Vignesh Murugan And Yazan AbuAwad"
+output: pdf_document
+date: "2024-09-06"
+---
+
+---
+
+\begin{center}
+
+\section*{Question 1}
+
+\end{center}
+
+---
+
+
+# (a) (15 points) Mathematics of PCA
+
+```{r include=FALSE}
+library(tidyverse)
+library(mlbench)
+data("Glass")
+
+duplicates <- duplicated(Glass)
+Glass[duplicates, ]
+sum(duplicated(Glass))
+
+Glass <- Glass[!duplicates, ]
+sum(duplicated(Glass))
+
+```
+
+i. Create the correlation matrix of all the numerical attributes in the Glass data and store the results in a new object corMat.
+
+```{r}
+# Compute the correlation matrix for the first 9 columns
+CorMat <- cor(Glass[, 1:9])
+
+```
+
+---
+
+ii. Compute the eigenvalues and eigenvectors of corMat.
+
+```{r}
+# Perform eigen decomposition on the correlation matrix
+eigen_result <- eigen(CorMat)
+eigen_values <- eigen_result$values
+eigen_vector <- eigen_result$vectors
+
+```
+
+----
+
+iii. Use prcomp to compute the principal components of the Glass attributes (make sure to use the scale option).
+
+```{r}
+# Perform Principal Component Analysis (PCA) on the first 9 columns
+pca <- prcomp(Glass[,1:9], scale. = TRUE)
+```
+
+---
+
+iv. Compare the results from (ii) and (iii) – Are they the same? Different? Why?
+
+```{r}
+# Compare eigenvalues to the variances explained by PCA components
+print(pca$sdev^2)  # Squaring standard deviations to get variances
+print(eigen_values)
+```
+
+The results from (ii) and (iii) are same.
+
+The eigenvalues from the correlation matrix's eigen decomposition represent the variance explained by each principal component, and these values are equivalent to the squared singular values (variances) calculated in prcomp. This equivalence arises because both approaches decompose the same matrix—correlation for scaled data, capturing how much variance each principal component accounts for. Thus, regardless of the method used, the key output—how variance is distributed across principal components—remains consistent, validating PCA's effectiveness in dimensionality reduction.
+
+---
+
+v. Using R demonstrate that principal components 1 and 2 from (iii) are orthogonal. (Hint: the inner product between two vectors is useful in determining the angle between the two vectors)
+
+```{r}
+# Extract the first two principal components
+pc1 <- pca$x[, 1]
+pc2 <- pca$x[, 2]
+# Compute the inner product (should be close to 0 if orthogonal)
+inner_product <- sum(pc1 * pc2)
+print(inner_product)
+```
+
+The result of the inner product between the first two principal components, which is approximately -3.392842e-13, is essentially zero. This extremely small value, close to zero, confirms that the first two principal components are orthogonal.
+
+---
+
+# (b) (15 points) Application of PCA
+
+i. Create a visualization of the corMat correlation matrix (i.e., a heatmap or variant) If you are interested and have time, consider the corrplot package for very nice options, https://cran.r-project.org/web/packages/corrplot/vignettes/corrplot-intro.html.
+
+```{r}
+library(corrplot)
+# Visualize the correlation matrix 
+corrplot(CorMat, method = "circle", order = "AOE")
+```
+
+---
+
+ii. Provide visualizations of the principal component analysis results from the Glass data. Consider incorporating the glass type to group and color your biplot.
+```{r include=FALSE}
+library(ggbiplot)
+```
+
+```{r}
+# Visualize PCA using ggbiplot
+ggbiplot(pca, groups = Glass$Type)
+```
+
+---
+
+iii. Provide an interpretation of the first two prinicpal components the Glass data.
+
+In PCA biplot,Variables with strong negative coefficients in PC1 are CA,RI and in PC2 are MG. Variables with strong positive coefficients in PC2 are Ba. The variables Ca and Ri have strong positive correlation and both have negative correlation with Si. The variable Mg has negative correlation with Ba.
+
+
+```{r}
+print(pca)
+```
+
+---
+
+iv. Based on the PCA results, do you believe that you can effectively reduce the dimension of the data? If so, to what degree? If not, why?
+
+Based on the results of the Principal Component Analysis (PCA), dimensionality reduction is not advisable in this instance. Typically, for PCA to be effective, the first few principal components should capture a substantial portion of the variance in the dataset. However, in this case, the first two principal components account for only 50% of the total variance, which is considerably low. This suggests that reducing dimensions may lead to significant information loss, thus impacting the integrity of the dataset.
+
+
+```{r}
+summary(pca)
+```
+
+---
+
+# (c) (15 points) Application of LDA
+
+i. Since the Glass data is grouped into various labeled glass types we can consider linear discriminant analysis (LDA) as another form of dimension reduction. Use the lda method from the MASS package to reduce the Glass data dimensionality.
+
+```{r include=FALSE}
+library(MASS)
+library(caret)
+```
+
+```{r}
+# Preprocess the data: center and scale
+preproc.param <- Glass %>% preProcess(method = c("center", "scale")) 
+# Transform the data using the estimated parameters 
+transformed <- preproc.param %>% predict(Glass)
+# Fit an LDA model to the transformed data
+lda.model <- lda(Type ~., data = transformed) 
+lda.model
+# Predict using the LDA model
+predictions <- lda.model %>% predict(transformed) 
+```
+
+---
+
+ii. How would you interpret the first discriminant function, LD1?
+
+Elements with negative coefficients like Na, Mg, and Ca, which have large absolute values, heavily influence LD1 in the negative direction, indicating that higher values of these elements contribute to moving the discriminant score downward. Conversely, Fe, with a small positive coefficient, has a minor positive influence on LD1. These loadings help understand which elements are most important in distinguishing between the groups analyzed.
+
+```{r}
+# Display the scaling of the LDA model
+lda.model$scaling
+```
+
+---
+
+iii. Use the ldahist function from the MASS package to visualize the results for LD1 and LD2. Comment on the results.
+
+In LD1, The type 1,2,3 are correlated, while 5,6,7 seem somewhat correlated.We can differentiate types 1,2,3 from 5,6,7.
+In LD2, only type 5 shows variation from other groups.
+
+```{r }
+
+par(mar=c(1,1,2,2))
+
+# Histogram of the first LDA component
+ldahist(predictions$x[,1], g = Glass$Type)
+
+# Histogram of the second LDA component
+ldahist(predictions$x[,2], g = Glass$Type, col = 3)
+
+```
+
+---
+
+\begin{center}
+
+\section*{Question 2.Principal components for dimension reduction}
+
+\end{center}
+
+---
+
+# (a) (10 points) Examine the event results using the Grubb’s test. According to this test there is one competitor who is an outlier for multiple events: Who is the competitor? And for which events is there statistical evidence that she is an outlier? Remove her from the data.
+
+The Outlier is Launa (PNG). For Events High Jump, Long Jump, Run800 there is strong evidence(pvalue<0.05) that there is an Outlier in these variables.
+
+```{r include=FALSE}
+library(HSAUR2)  # For the heptathlon dataset
+library(outliers)  # For Grubb’s test
+# Load the heptathlon dataset
+heptathlon <- heptathlon
+```
+
+```{r}
+
+# Detect outliers in each column using Grubb's test
+outliers <- sapply(heptathlon[,1:7],function (x){
+  test <- grubbs.test(x)
+})
+outlier(heptathlon[1:8])
+# Identify specific outliers in the 'hurdles' event
+heptathlon[heptathlon$hurdles==outlier(heptathlon$hurdles),]
+# Removing outliler from dataset
+heptathlon <- heptathlon[heptathlon$hurdles!=outlier(heptathlon$hurdles),]
+
+```
+
+---
+
+(b) (5 points) As is, some event results are “good” if the values are large (e.g. highjump), but some are “bad” if the value is large (e.g. time to run the 200 meter dash). Transform the running events (hurdles, run200m, run800m) so that large values are good. An easy way to do this is to subtract values from the max value for the event.
+
+```{r}
+# Transform running event times to scores
+heptathlon_transformed <- heptathlon %>%
+  mutate(
+    hurdles = max(hurdles) - hurdles,
+    run200m = max(run200m) - run200m,
+    run800m = max(run800m) - run800m
+  )
+```
+
+---
+
+(c) (5 points) Perform a principal component analysis on the 7 event results and save the results of the prcomp function to a new variable Hpca.
+
+```{r , error=TRUE}
+# Perform PCA on the transformed heptathlon data
+Hpca <- prcomp(heptathlon_transformed[, 1:7], scale. = TRUE)
+```
+
+---
+
+(d) (10 points) Use ggibiplot to visualize the first two principal components. Provide a concise interpretation of the results.
+
+The variance explained by Both PCA is 70% , which is kind of acceptable. The events longjump and javelin are highly correlated. Th events run200,hurdles,longjump,shot are highly correlated and these values are highy dependent/correlated with pc1.
+
+```{r , error=TRUE}
+# Visualize PCA results with ggbiplot
+ggbiplot(Hpca)
+```
+
+---
+
+(e) (10 points) The PCA projections onto principal components 1, 2, 3, . . . for each competitor can now be accessed as Hpca$x[,1], Hpca$x[,2], Hpca$x[,3], . . . . Plot the heptathlon score against the principal component 1 projections. Briefly discuss these results.
+
+As Hpc1 increases the score decreases.
+
+```{r}
+Hpc1 <- Hpca$x[,1]
+# Plot first principal component against the heptathlon score
+ggplot(mapping = aes(Hpc1, heptathlon$score)) +
+  geom_point() +
+  labs(y = "score")
+```
+
+---
+
+\begin{center}
+
+\section*{Question 3.Housing data dimension reduction and exploration}
+
+\end{center}
+
+---
+
+```{r include=FALSE}
+housingData <- read_csv("housingData.csv")
+# Convert housing data to tibble for easier manipulation
+housingData <- as_tibble(housingData)
+# Select and transform numerical columns, calculate additional features
+hd <- housingData %>%
+  select_if(is.numeric) %>%
+  dplyr::mutate(age = YrSold - YearBuilt,
+                ageSinceRemodel = YrSold - YearRemodAdd,
+                ageofGarage = ifelse(is.na(GarageYrBlt), age, YrSold - GarageYrBlt)) %>%
+  dplyr::select(!c(Id,MSSubClass, LotFrontage, GarageYrBlt,
+                   MiscVal, YrSold  , MoSold, YearBuilt,
+                   YearRemodAdd, MasVnrArea))
+```
+
+
+(15 points) Using this newly created data set hd, perform PCA and correlation analysis. Did you find anything worthwhile? Make sure to respond with visualizations and interpretations of at least the most important principal components.
+
+```{r,fig.width=10, fig.height=10}
+# Compute the correlation matrix of the processed data
+cor_hd <- cor(hd)
+# Visualize the correlation matrix using corrplot
+corrplot(cor_hd,method = "circle", order = "alphabet")
+```
+
+```{r}
+# Perform PCA on the processed housing data
+pca_hd <- prcomp(hd, scale. = TRUE)
+# Display summary of PCA results
+summary(pca_hd)
+# Plot a scree plot to show the variances explained by the principal components
+screeplot(pca_hd, npcs = min(20, length(pca_hd$sdev)), 
+          type = "lines", main = "Scree Plot of Pca_hd")
+```
+
+```{r, fig.width=15, fig.height=15}
+# Visualize PCA results using ggbiplot
+ggbiplot(pca_hd)
+```
+
+From the Correlation Plot , we can say that the variables :
+
+1. Age, ageofGarage, ageSinceRemodel are negtively correlated with OverallQual.
+2. Age is negatively correlated with saleprice.
+3. OverallQual, Saleprice are positively correlated with Fullbath, GarageArea, GarageCars, GrLivArea.
+
+
+From Biplot, The variances captured by first 2 pca is very low. Better not to make decisions on this. Reducing the dimensions may lead to significant information loss, thus impacting the integrity of the dataset.
+
+
